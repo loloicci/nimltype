@@ -8,9 +8,16 @@ nimltype *Hoge:
   E of (int, string)
 
 let
+  aa = A(3)
+  bb = B(2, 3)
+  cc = C()
+  dd = D("hoge")
+  ee = E(2, "hoge")
+
+let
   a = A.new(3)
   b = B.new(2, 3)
-  c = C.new
+  c = C.new()
   d = D.new("hoge")
   e = E.new(2, "hoge")
 
@@ -33,3 +40,14 @@ testMatch b
 testMatch c
 testMatch d
 testMatch e
+testMatch aa
+testMatch bb
+testMatch cc
+testMatch dd
+testMatch ee
+
+echo a
+echo b
+echo c
+echo d
+echo e

@@ -3,6 +3,22 @@ import sequtils
 import strutils
 import tables
 
+proc nimlValueToString*(x: tuple): string =
+  result = ""
+  var i = 0
+  for n in x.fields:
+    if i == 0:
+      result = result & "("
+    else:
+      result = result & ", "
+    result = result & $n
+    inc i
+  if i > 0:
+    result = result & ")"
+
+proc nimlValueToString*[T: not tuple](x: T): string =
+  return "(" & $x & ")"
+
 var kindToType {.compiletime.}: TableRef[string, string] =
   newTable[string, string]()
 
@@ -24,6 +40,19 @@ macro nimltype*(id, body: untyped): untyped =
 
   proc newDecIdentNode(name: string, isPublic: bool): NimNode =
     return newDecIdentNode(!name, isPublic)
+
+  proc newDecAccQuotedIdent(name: string, isPublic: bool): NimNode =
+    if isPublic:
+      result = nnkPostfix.newTree(
+        newIdentNode("*"),
+        nnkAccQuoted.newTree(
+          newIdentNode(name)
+        )
+      )
+    else:
+      result = nnkAccQuoted.newTree(
+          newIdentNode(name)
+        )
 
   var
     name: string
@@ -68,7 +97,12 @@ macro nimltype*(id, body: untyped): untyped =
     kindNodes = nnkEnumTy.newTree(
       concat(@[newEmptyNode()], kindIdentNodes))
   var kindTree = nnkTypeDef.newTree(
-    (kindName).newDecIdentNode(public),
+    nnkPragmaExpr.newTree(
+      (kindName).newDecIdentNode(public),
+      nnkPragma.newTree(
+        newIdentNode("pure")
+      )
+    ),
     newEmptyNode(),
     kindNodes
   )
@@ -119,12 +153,147 @@ macro nimltype*(id, body: untyped): untyped =
     )
   )
 
-  result = nnkStmtList.newTree(
+  # Define constructor procs
+  var constructorProcs: seq[NimNode] = @[]
+  for kindAndTypeIds in zip(kinds, typeIdsSeq):
+    let (kind, typeIds) = kindAndTypeIds
+    var
+      args: seq[NimNode] = @[]
+      argnames: seq[NimNode] = @[]
+      valNode: NimNode
+    if typeIds.kind == nnkPar:
+      for i, typeId in typeIds:
+        args.add(
+          nnkIdentDefs.newTree(
+            newIdentNode("arg" & $i),
+            typeId,
+            newEmptyNode()
+          )
+        )
+        argnames.add(
+          newIdentNode("arg" & $i)
+        )
+    elif typeIds.kind == nnkIdent:
+      args.add(
+        nnkIdentDefs.newTree(
+          newIdentNode("arg"),
+          typeIds,
+          newEmptyNode()
+        )
+      )
+      argnames.add(
+        newIdentNode("arg")
+      )
+    if argnames.len == 1:
+      valNode = argnames[0]
+    else:
+      valNode = nnkPar.newTree(
+        argnames
+      )
+    constructorProcs.add(
+      nnkProcDef.newTree(
+        kind.newDecIdentNode(public),
+        newEmptyNode(),
+        newEmptyNode(),
+        nnkFormalParams.newTree(
+          concat(
+            @[newIdentNode(kindToType[$kind])],
+            args
+          )
+        ),
+        newEmptyNode(),
+        newEmptyNode(),
+        nnkStmtList.newTree(
+          nnkReturnStmt.newTree(
+            nnkObjConstr.newTree(
+              newIdentNode(kindToType[$kind]),
+              nnkExprColonExpr.newTree(
+                newIdentNode("kind"),
+                nnkDotExpr.newTree(
+                  newIdentNode(kindName),
+                  newIdentNode(kind)
+                )
+              ),
+              nnkExprColonExpr.newTree(
+                newIdentNode(kind.kindToValName),
+                valNode
+              )
+            )
+          )
+        )
+      )
+    )
+
+  # Define toString proc
+  var toStringCaseClouds: seq[NimNode] = @[
+    nnkDotExpr.newTree(
+      newIdentNode("x"),
+      newIdentNode("kind")
+    )
+  ]
+  for kind in kinds:
+    toStringCaseClouds.add(
+      nnkOfBranch.newTree(
+        nnkDotExpr.newTree(
+          newIdentNode(kindName),
+          newIdentNode(kind)
+        ),
+        nnkStmtList.newTree(
+          nnkReturnStmt.newTree(
+            nnkInfix.newTree(
+              newIdentNode("&"),
+              nnkPrefix.newTree(
+                newIdentNode("$"),
+                nnkDotExpr.newTree(
+                  newIdentNode("x"),
+                  newIdentNode("kind")
+                )
+              ),
+              nnkCall.newTree(
+                newIdentNode("nimlValueToString"),
+                nnkDotExpr.newTree(
+                  newIdentNode("x"),
+                  newIdentNode(kind.kindToValName)
+                )
+              )
+            )
+          )
+        )
+      )
+    )
+  let toStringProc: NimNode = nnkProcDef.newTree(
+    "$".newDecAccQuotedIdent(public),
+    newEmptyNode(),
+    newEmptyNode(),
+    nnkFormalParams.newTree(
+      newIdentNode("string"),
+      nnkIdentDefs.newTree(
+        newIdentNode("x"),
+        newIdentNode(name),
+        newEmptyNode()
+      )
+    ),
+    newEmptyNode(),
+    newEmptyNode(),
+    nnkStmtList.newTree(
+      nnkCaseStmt.newTree(
+        toStringCaseClouds
+      )
+    )
+  )
+
+  var resultSeq: seq[NimNode] = @[]
+  resultSeq.add(
     nnkTypeSection.newTree(
       kindTree,
       tyTree,
       tyObjTree,
     )
+  )
+  resultSeq = concat(resultSeq, constructorProcs)
+  resultSeq.add(toStringProc)
+  result = nnkStmtList.newTree(
+    resultSeq
   )
 
 macro match*(head, body: untyped): untyped =
@@ -182,7 +351,10 @@ macro match*(head, body: untyped): untyped =
     cloudBody.add(cloud[^1])
     matchClouds.add(
       nnkOfBranch.newTree(
-        cloud[0],
+        nnkDotExpr.newTree(
+          newIdentNode(kindToType[$cloud[0].ident] & "Kind"),
+          cloud[0]
+        ),
         nnkStmtList.newTree(cloudBody)
       )
     )
@@ -194,23 +366,27 @@ macro match*(head, body: untyped): untyped =
   )
 
 macro new*(kind: untyped, args: varargs[untyped]): untyped =
-  var kindname: string
+  var kindName: string
   if kind.kind == nnkSym:
-    kindname = $kind.symbol
+    kindName = $kind.symbol
   elif kind.kind == nnkIdent:
-    kindname = $kind.ident
+    kindName = $kind.ident
   else:
-    error "new requires nnkSym or nnkIdent as the first arg.:\n" & kind.treeRepr
-
+    error (
+      "new requires nnkSym or nnkIdent as the first arg.:\n" & kind.treeRepr
+    )
   result = nnkStmtList.newTree(
     nnkObjConstr.newTree(
-      newIdentNode(kindToType[kindname]),
+      newIdentNode(kindToType[kindName]),
       nnkExprColonExpr.newTree(
         newIdentNode("kind"),
-        newIdentNode(kindname)
+        nnkDotExpr.newTree(
+          newIdentNode(kindToType[kindName] & "Kind"),
+          newIdentNode(kindname)
+        )
       ),
       nnkExprColonExpr.newTree(
-        newIdentNode(kindname.kindToValName),
+        newIdentNode(kindName.kindToValName),
         nnkPar.newTree(
           args.toSeq
         )
