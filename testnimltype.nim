@@ -17,7 +17,7 @@ let
 let
   a = A.new(3)
   b = B.new(2, 3)
-  c = C.new()
+  c = C.new
   d = D.new("hoge")
   e = E.new(2, "hoge")
 
