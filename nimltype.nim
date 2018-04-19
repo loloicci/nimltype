@@ -73,18 +73,46 @@ macro nimltype*(id, body: untyped): untyped =
   var
     kinds: seq[NimIdent] = @[]
     typeIdsSeq: seq[NimNode] = @[]
+    kindNodes: seq[NimNode] = @[newEmptyNode()]
 
   for node in body:
     if node.kind == nnkIdent:
       kinds.add(node.ident)
+      kindNodes.add(node)
       typeIdsSeq.add(nnkTupleTy.newTree())
     elif node.kind == nnkInfix:
       if node[0].ident != !"of" or node[1].kind != nnkIdent:
         error "a Kind is Invalid:\n" & body.treeRepr
       kinds.add(node[1].ident)
+      kindNodes.add(node[1])
       typeIdsSeq.add(node[2])
+    elif node.kind == nnkAsgn:
+      kinds.add(node[0].ident)
+      if node[1].kind == nnkInfix:
+        if node[1][0].ident != !"of":
+          error "a Kind is Invalid:\n" & body.treeRepr
+        typeIdsSeq.add(node[1][2])
+        kindNodes.add(
+          nnkEnumFieldDef.newTree(
+            node[0],
+            node[1][1]
+          )
+        )
+      elif node.len == 2:
+        typeIdsSeq.add(nnkTupleTy.newTree())
+        kindNodes.add(
+          nnkEnumFieldDef.newTree(
+            node[0],
+            node[1]
+          )
+        )
+      else:
+        error "a cloud is Invalid:\n" & body.treeRepr
     else:
-      error "a cloud is Invalid:\n"
+      error "a cloud is Invalid:\n" & body.treeRepr
+
+    assert kinds.len == kindNodes.len - 1
+    assert kinds.len == typeIdsSeq.len
 
   for x in kinds:
     kindToType[$x] = name
@@ -93,9 +121,6 @@ macro nimltype*(id, body: untyped): untyped =
   let
     kindName = name & "Kind"
     objName = name & "Obj"
-    kindIdentNodes = kinds.map(newIdentNode)
-    kindNodes = nnkEnumTy.newTree(
-      concat(@[newEmptyNode()], kindIdentNodes))
   var kindTree = nnkTypeDef.newTree(
     nnkPragmaExpr.newTree(
       (kindName).newDecIdentNode(public),
@@ -104,7 +129,9 @@ macro nimltype*(id, body: untyped): untyped =
       )
     ),
     newEmptyNode(),
-    kindNodes
+    nnkEnumTy.newTree(
+      kindNodes
+    )
   )
 
   # Define [TypeName]
