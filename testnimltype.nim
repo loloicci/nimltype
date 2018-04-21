@@ -77,3 +77,5 @@ doAssert $bb == "bb(2, 3)"
 doAssert $cc == "cc"
 doAssert $dd == "dd(hoge)"
 doAssert $ee == "ee(2, hoge)"
+
+echo "Succeed"

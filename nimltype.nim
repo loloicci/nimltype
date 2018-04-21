@@ -22,128 +22,108 @@ proc nimlValueToString*[T: not tuple](x: T): string =
 var kindToType {.compiletime.}: TableRef[string, string] =
   newTable[string, string]()
 
-proc kindToValName(kind: string): string {.compiletime.} =
+proc kindToValName(kind: string): string =
   return toLower(kind) & "Val"
 
 proc kindToValName(kind: NimIdent): string {.compiletime.} =
   return ($kind).kindToValName
 
-macro nimltype*(id, body: untyped): untyped =
-  proc newDecIdentNode(name: NimIdent, isPublic: bool): NimNode =
-    if isPublic:
-      result = nnkPostfix.newTree(
-        newIdentNode("*"),
+proc newDecIdentNode(name: NimIdent, isPublic: bool): NimNode =
+  if isPublic:
+    result = nnkPostfix.newTree(
+      newIdentNode("*"),
+      newIdentNode(name)
+    )
+  else:
+    result = newIdentNode(name)
+
+proc newDecIdentNode(name: string, isPublic: bool): NimNode =
+  return newDecIdentNode(!name, isPublic)
+
+proc newDecAccQuotedIdent(name: string, isPublic: bool): NimNode =
+  if isPublic:
+    result = nnkPostfix.newTree(
+      newIdentNode("*"),
+      nnkAccQuoted.newTree(
         newIdentNode(name)
       )
-    else:
-      result = newIdentNode(name)
+    )
+  else:
+    result = nnkAccQuoted.newTree(
+      newIdentNode(name)
+    )
 
-  proc newDecIdentNode(name: string, isPublic: bool): NimNode =
-    return newDecIdentNode(!name, isPublic)
+proc parseHeader(head: NimNode): tuple[public: bool, name: string] =
+  if head.kind == nnkPrefix and head[0].ident == !"*":
+    result.public = true
+    result.name = $head[1].ident
+  elif head.kind == nnkIdent:
+    result.public = false
+    result.name = $head.ident
+  else:
+    error "IdNode is Invalid:\n" & head.treeRepr
 
-  proc newDecAccQuotedIdent(name: string, isPublic: bool): NimNode =
-    if isPublic:
-      result = nnkPostfix.newTree(
-        newIdentNode("*"),
-        nnkAccQuoted.newTree(
-          newIdentNode(name)
-        )
+proc parseBodyCloud(cloud: NimNode): tuple[
+    kind: NimIdent, kindNode: NimNode, typeId: NimNode] =
+  if cloud.kind == nnkIdent:
+    result.kind = cloud.ident
+    result.kindNode = cloud
+    result.typeId = nnkTupleTy.newTree()
+  elif cloud.kind == nnkInfix:
+    if cloud[0].ident != !"of" or cloud[1].kind != nnkIdent:
+      error "a Kind is Invalid:\n" & cloud.treeRepr
+    result.kind = cloud[1].ident
+    result.kindNode = cloud[1]
+    result.typeId = cloud[2]
+  elif cloud.kind == nnkAsgn:
+    result.kind = cloud[0].ident
+    if cloud[1].kind == nnkInfix:
+      if cloud[1][0].ident != !"of":
+        error "a Kind is Invalid:\n" & cloud.treeRepr
+      result.typeId = cloud[1][2]
+      result.kindNode = nnkEnumFieldDef.newTree(
+        cloud[0],
+        cloud[1][1]
+      )
+    elif cloud.len == 2:
+      result.typeId = nnkTupleTy.newTree()
+      result.kindNode = nnkEnumFieldDef.newTree(
+        cloud[0],
+        cloud[1]
       )
     else:
-      result = nnkAccQuoted.newTree(
-          newIdentNode(name)
-        )
-
-  var
-    name: string
-    public: bool
-
-  if id.kind == nnkPrefix and id[0].ident == !"*":
-    public = true
-    name = $id[1].ident
-  elif id.kind == nnkIdent:
-    public = false
-    name = $id.ident
+      error "a cloud is Invalid:\n" & cloud.treeRepr
   else:
-    error "IdNode is Invalid:\n" & id.treeRepr
+    error "a cloud is Invalid:\n" & cloud.treeRepr
 
-  if body.kind != nnkStmtList:
-    error "BodyNode is Invalid:\n" & body.treeRepr
-
-  var
-    kinds: seq[NimIdent] = @[]
-    typeIdsSeq: seq[NimNode] = @[]
-    kindNodes: seq[NimNode] = @[newEmptyNode()]
-
-  for node in body:
-    if node.kind == nnkIdent:
-      kinds.add(node.ident)
-      kindNodes.add(node)
-      typeIdsSeq.add(nnkTupleTy.newTree())
-    elif node.kind == nnkInfix:
-      if node[0].ident != !"of" or node[1].kind != nnkIdent:
-        error "a Kind is Invalid:\n" & body.treeRepr
-      kinds.add(node[1].ident)
-      kindNodes.add(node[1])
-      typeIdsSeq.add(node[2])
-    elif node.kind == nnkAsgn:
-      kinds.add(node[0].ident)
-      if node[1].kind == nnkInfix:
-        if node[1][0].ident != !"of":
-          error "a Kind is Invalid:\n" & body.treeRepr
-        typeIdsSeq.add(node[1][2])
-        kindNodes.add(
-          nnkEnumFieldDef.newTree(
-            node[0],
-            node[1][1]
-          )
-        )
-      elif node.len == 2:
-        typeIdsSeq.add(nnkTupleTy.newTree())
-        kindNodes.add(
-          nnkEnumFieldDef.newTree(
-            node[0],
-            node[1]
-          )
-        )
-      else:
-        error "a cloud is Invalid:\n" & body.treeRepr
-    else:
-      error "a cloud is Invalid:\n" & body.treeRepr
-
-    assert kinds.len == kindNodes.len - 1
-    assert kinds.len == typeIdsSeq.len
-
-  for x in kinds:
-    kindToType[$x] = name
-
-  # Define [TypeName]Kind
-  let
-    kindName = name & "Kind"
-    objName = name & "Obj"
-  var kindTree = nnkTypeDef.newTree(
+proc newPureEnumTree(
+    name: string, ofClouds: seq[NimNode], public: bool): NimNode =
+  result = nnkTypeDef.newTree(
     nnkPragmaExpr.newTree(
-      (kindName).newDecIdentNode(public),
+      name.newDecIdentNode(public),
       nnkPragma.newTree(
         newIdentNode("pure")
       )
     ),
     newEmptyNode(),
     nnkEnumTy.newTree(
-      kindNodes
+      concat(@[newEmptyNode()], ofClouds)
     )
   )
 
-  # Define [TypeName]
-  var tyTree = nnkTypeDef.newTree(
+proc newRefObjectTree(
+    name: string, refTarget: string, public: bool): NimNode =
+  result = nnkTypeDef.newTree(
     name.newDecIdentNode(public),
     newEmptyNode(),
     nnkRefTy.newTree(
-      newIdentNode(objName)
+      newIdentNode(refTarget)
     )
   )
 
-  # Define [TypeName]Obj
+proc newNimltypeTree(
+    name, kindName: string,
+    kinds: seq[NimIdent], typeIdsNodes: seq[NimNode], public: bool): NimNode =
   var
     caseTree: seq[NimNode] = @[nnkIdentDefs.newTree(
       "kind".newDecIdentNode(public),
@@ -151,23 +131,23 @@ macro nimltype*(id, body: untyped): untyped =
       newEmptyNode()
     )]
 
-  for kindAndTypeIds in zip(kinds, typeIdsSeq):
-    let (kind, typeIds) = kindAndTypeIds
+  for kindAndTypeIds in zip(kinds, typeIdsNodes):
+    let (kind, typeIdsNode) = kindAndTypeIds
     caseTree.add(
       nnkOfBranch.newTree(
         newIdentNode(kind),
         nnkRecList.newTree(
           nnkIdentDefs.newTree(
             kind.kindToValName.newDecIdentNode(public),
-            typeIds,
+            typeIdsNode,
             newEmptyNode()
           )
         )
       )
     )
 
-  var tyObjTree = nnkTypeDef.newTree(
-    newIdentNode(objName),
+  result = nnkTypeDef.newTree(
+    newIdentNode(name),
     newEmptyNode(),
     nnkObjectTy.newTree(
       newEmptyNode(),
@@ -180,78 +160,78 @@ macro nimltype*(id, body: untyped): untyped =
     )
   )
 
-  # Define constructor procs
-  var constructorProcs: seq[NimNode] = @[]
-  for kindAndTypeIds in zip(kinds, typeIdsSeq):
-    let (kind, typeIds) = kindAndTypeIds
-    var
-      args: seq[NimNode] = @[]
-      argnames: seq[NimNode] = @[]
-      valNode: NimNode
-    if typeIds.kind == nnkPar:
-      for i, typeId in typeIds:
-        args.add(
-          nnkIdentDefs.newTree(
-            newIdentNode("arg" & $i),
-            typeId,
-            newEmptyNode()
-          )
-        )
-        argnames.add(
-          newIdentNode("arg" & $i)
-        )
-    elif typeIds.kind == nnkIdent:
+proc newConstructorProcTree(
+    kind: NimIdent, kindName: string, typeIdsNode: NimNode,
+    public: bool): NimNode =
+  var
+    args: seq[NimNode] = @[]
+    argnames: seq[NimNode] = @[]
+    valNode: NimNode
+  if typeIdsNode.kind == nnkPar:
+    for i, typeId in typeIdsNode:
       args.add(
         nnkIdentDefs.newTree(
-          newIdentNode("arg"),
-          typeIds,
+          newIdentNode("arg" & $i),
+          typeId,
           newEmptyNode()
         )
       )
       argnames.add(
-        newIdentNode("arg")
+        newIdentNode("arg" & $i)
       )
-    if argnames.len == 1:
-      valNode = argnames[0]
-    else:
-      valNode = nnkPar.newTree(
-        argnames
+  elif typeIdsNode.kind == nnkIdent:
+    args.add(
+      nnkIdentDefs.newTree(
+        newIdentNode("arg"),
+        typeIdsNode,
+        newEmptyNode()
       )
-    constructorProcs.add(
-      nnkProcDef.newTree(
-        kind.newDecIdentNode(public),
-        newEmptyNode(),
-        newEmptyNode(),
-        nnkFormalParams.newTree(
-          concat(
-            @[newIdentNode(kindToType[$kind])],
-            args
-          )
-        ),
-        newEmptyNode(),
-        newEmptyNode(),
-        nnkStmtList.newTree(
-          nnkReturnStmt.newTree(
-            nnkObjConstr.newTree(
-              newIdentNode(kindToType[$kind]),
-              nnkExprColonExpr.newTree(
-                newIdentNode("kind"),
-                nnkDotExpr.newTree(
-                  newIdentNode(kindName),
-                  newIdentNode(kind)
-                )
-              ),
-              nnkExprColonExpr.newTree(
-                newIdentNode(kind.kindToValName),
-                valNode
-              )
+    )
+    argnames.add(
+      newIdentNode("arg")
+    )
+  if argnames.len == 1:
+    valNode = argnames[0]
+  else:
+    valNode = nnkPar.newTree(
+      argnames
+    )
+
+  result = nnkProcDef.newTree(
+    kind.newDecIdentNode(public),
+    newEmptyNode(),
+    newEmptyNode(),
+    nnkFormalParams.newTree(
+      concat(
+        @[newIdentNode(kindToType[$kind])],
+        args
+      )
+    ),
+    newEmptyNode(),
+    newEmptyNode(),
+    nnkStmtList.newTree(
+      nnkReturnStmt.newTree(
+        nnkObjConstr.newTree(
+          newIdentNode(kindToType[$kind]),
+          nnkExprColonExpr.newTree(
+            newIdentNode("kind"),
+            nnkDotExpr.newTree(
+              newIdentNode(kindName),
+              newIdentNode(kind)
             )
-          )
+          ),
+        nnkExprColonExpr.newTree(
+          newIdentNode(kind.kindToValName),
+          valNode
+        )
         )
       )
     )
+  )
 
-  # Define toString proc
+proc newNimltypeToStringProc(
+    nimltypeName: string, kindName: string, kinds: seq[NimIdent],
+    public: bool): NimNode =
   var toStringCaseClouds: seq[NimNode] = @[
     nnkDotExpr.newTree(
       newIdentNode("x"),
@@ -288,7 +268,8 @@ macro nimltype*(id, body: untyped): untyped =
         )
       )
     )
-  let toStringProc: NimNode = nnkProcDef.newTree(
+
+  result = nnkProcDef.newTree(
     "$".newDecAccQuotedIdent(public),
     newEmptyNode(),
     newEmptyNode(),
@@ -296,7 +277,7 @@ macro nimltype*(id, body: untyped): untyped =
       newIdentNode("string"),
       nnkIdentDefs.newTree(
         newIdentNode("x"),
-        newIdentNode(name),
+        newIdentNode(nimltypeName),
         newEmptyNode()
       )
     ),
@@ -309,6 +290,51 @@ macro nimltype*(id, body: untyped): untyped =
     )
   )
 
+macro nimltype*(head, body: untyped): untyped =
+  body.expectKind(nnkStmtList)
+
+  let
+    (public, name) = parseHeader(head)
+    kindName = name & "Kind"
+    objName = name & "Obj"
+
+  var
+    kinds: seq[NimIdent] = @[]
+    kindNodes: seq[NimNode] = @[]
+    typeIdsNodes: seq[NimNode] = @[]
+
+  for cloud in body:
+    let (kind, kindNode, typeId) = parseBodyCloud(cloud)
+    kinds.add(kind)
+    kindNodes.add(kindNode)
+    typeIdsNodes.add(typeId)
+
+    # `kindToType` is global var
+    kindToType[$kind] = name
+
+  # Define [TypeName]Kind
+  let kindTree = newPureEnumTree(kindName, kindNodes, public)
+
+  # Define [TypeName]
+  let tyTree = newRefObjectTree(name, objName, public)
+
+  # Define [TypeName]Obj
+  let tyObjTree = newNimltypeTree(
+    objName, kindName, kinds, typeIdsNodes, public)
+
+  # Define constructor procs
+  var constructorProcs: seq[NimNode] = @[]
+  for kindAndTypeIds in zip(kinds, typeIdsNodes):
+    let (kind, typeIdsNode) = kindAndTypeIds
+    constructorProcs.add(
+      newConstructorProcTree(kind, kindName, typeIdsNode, public)
+    )
+
+  # Define toString proc
+  let toStringProc = newNimltypeToStringProc(
+    name, kindName, kinds, public)
+
+  # Make result
   var resultSeq: seq[NimNode] = @[]
   resultSeq.add(
     nnkTypeSection.newTree(
@@ -324,11 +350,8 @@ macro nimltype*(id, body: untyped): untyped =
   )
 
 macro match*(head, body: untyped): untyped =
-  if head.kind != nnkIdent:
-    error "match's arg is Invalid:\n" & head.treeRepr
-
-  if body.kind != nnkStmtList:
-    error "match's body is Invalid:\n" & body.treeRepr
+  head.expectKind(nnkIdent)
+  body.expectKind(nnkStmtList)
 
   var matchClouds: seq[NimNode] = @[
           nnkDotExpr.newTree(
