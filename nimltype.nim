@@ -53,15 +53,49 @@ proc newDecAccQuotedIdent(name: string, isPublic: bool): NimNode =
       newIdentNode(name)
     )
 
-proc parseHeader(head: NimNode): tuple[public: bool, name: string] =
+proc parseHeaderIdent(hi: NimNode): tuple[name: string, tyGeneric: NimNode] =
+  if hi.kind == nnkIdent:
+    result.name = $hi.ident
+    result.tyGeneric = newEmptyNode()
+  elif hi.kind == nnkBracketExpr:
+    var genericTree: seq[NimNode] = @[]
+    for i, n in hi:
+      if i == 0:
+        result.name = $n.ident
+      else:
+        if n.kind == nnkExprColonExpr:
+          genericTree.add(
+            nnkIdentDefs.newTree(
+              n[0],
+              n[1],
+              newEmptyNode()
+            )
+          )
+        elif n.kind == nnkIdent:
+          genericTree.add(
+            nnkIdentDefs.newTree(
+              n,
+              newEmptyNode(),
+              newEmptyNode()
+            )
+          )
+        else:
+          error "Nimltype's Head is Invalid:\n" & hi.treeRepr
+    result.tyGeneric = nnkGenericParams.newTree(
+      genericTree
+    )
+  else:
+    error "Nimltype's Head is Invalid:\n" & hi.treeRepr
+
+
+proc parseHeader(head: NimNode): tuple[public: bool, name: string,
+                                       tyGeneric: NimNode] =
   if head.kind == nnkPrefix and head[0].ident == !"*":
     result.public = true
-    result.name = $head[1].ident
-  elif head.kind == nnkIdent:
-    result.public = false
-    result.name = $head.ident
+    (result.name, result.tyGeneric) = parseHeaderIdent(head[1])
   else:
-    error "IdNode is Invalid:\n" & head.treeRepr
+    result.public = false
+    (result.name, result.tyGeneric) = parseHeaderIdent(head)
 
 proc parseBodyCloud(cloud: NimNode): tuple[
     kind: NimIdent, kindNode: NimNode, typeId: NimNode] =
@@ -112,7 +146,8 @@ proc newPureEnumTree(
   )
 
 proc newRefObjectTree(
-    name: string, refTarget: string, public: bool): NimNode =
+    name: string, refTarget: string, tyGeneric: NimNode,
+    public: bool): NimNode =
   result = nnkTypeDef.newTree(
     name.newDecIdentNode(public),
     newEmptyNode(),
@@ -122,7 +157,7 @@ proc newRefObjectTree(
   )
 
 proc newNimltypeTree(
-    name, kindName: string,
+    name, kindName: string, tyGeneric: NimNode,
     kinds: seq[NimIdent], typeIdsNodes: seq[NimNode], public: bool): NimNode =
   var
     caseTree: seq[NimNode] = @[nnkIdentDefs.newTree(
@@ -161,7 +196,7 @@ proc newNimltypeTree(
   )
 
 proc newConstructorProcTree(
-    kind: NimIdent, kindName: string, typeIdsNode: NimNode,
+    kind: NimIdent, kindName: string, tyGeneric: NimNode, typeIdsNode: NimNode,
     public: bool): NimNode =
   var
     args: seq[NimNode] = @[]
@@ -230,8 +265,8 @@ proc newConstructorProcTree(
   )
 
 proc newNimltypeToStringProc(
-    nimltypeName: string, kindName: string, kinds: seq[NimIdent],
-    public: bool): NimNode =
+    nimltypeName: string, kindName: string, tyGeneric: NimNode,
+    kinds: seq[NimIdent], public: bool): NimNode =
   var toStringCaseClouds: seq[NimNode] = @[
     nnkDotExpr.newTree(
       newIdentNode("x"),
@@ -294,7 +329,7 @@ macro nimltype*(head, body: untyped): untyped =
   body.expectKind(nnkStmtList)
 
   let
-    (public, name) = parseHeader(head)
+    (public, name, tyGeneric) = parseHeader(head)
     kindName = name & "Kind"
     objName = name & "Obj"
 
@@ -316,23 +351,23 @@ macro nimltype*(head, body: untyped): untyped =
   let kindTree = newPureEnumTree(kindName, kindNodes, public)
 
   # Define [TypeName]
-  let tyTree = newRefObjectTree(name, objName, public)
+  let tyTree = newRefObjectTree(name, objName, tyGeneric, public)
 
   # Define [TypeName]Obj
   let tyObjTree = newNimltypeTree(
-    objName, kindName, kinds, typeIdsNodes, public)
+    objName, kindName, tyGeneric, kinds, typeIdsNodes, public)
 
   # Define constructor procs
   var constructorProcs: seq[NimNode] = @[]
   for kindAndTypeIds in zip(kinds, typeIdsNodes):
     let (kind, typeIdsNode) = kindAndTypeIds
     constructorProcs.add(
-      newConstructorProcTree(kind, kindName, typeIdsNode, public)
+      newConstructorProcTree(kind, kindName, tyGeneric, typeIdsNode, public)
     )
 
   # Define toString proc
   let toStringProc = newNimltypeToStringProc(
-    name, kindName, kinds, public)
+    name, kindName, tyGeneric, kinds, public)
 
   # Make result
   var resultSeq: seq[NimNode] = @[]
