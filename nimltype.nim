@@ -474,20 +474,10 @@ macro new*(kind: untyped, args: varargs[untyped]): untyped =
       "new requires nnkSym or nnkIdent as the first arg.:\n" & kind.treeRepr
     )
   result = nnkStmtList.newTree(
-    nnkObjConstr.newTree(
-      newIdentNode(kindToType[kindName]),
-      nnkExprColonExpr.newTree(
-        newIdentNode("kind"),
-        nnkDotExpr.newTree(
-          newIdentNode(kindToType[kindName] & "Kind"),
-          newIdentNode(kindname)
-        )
-      ),
-      nnkExprColonExpr.newTree(
-        newIdentNode(kindName.kindToValName),
-        nnkPar.newTree(
-          args.toSeq
-        )
+    nnkCall.newTree(
+      concat(
+        @[newIdentNode(kindName)],
+        args.toSeq
       )
     )
   )
