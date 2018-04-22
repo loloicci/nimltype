@@ -15,11 +15,15 @@ nimltype Fuga:
   FE = "e" of (int, string)
 
 nimltype *Piyo[T1, T2: int | string, T3: not int]:
-  PA of (T1)
+  PA of T1
   PB of (T1, T2)
   PC
   PD of T3
   PE of (T1, T3)
+
+nimlSpecial:
+  *PP[T] = Piyo[int, int, T]
+  *P = PP[string]
 
 proc testMatch(x: Hoge): bool =
   match x:
@@ -84,14 +88,19 @@ let
   pd = PD[int, int, string]("hoge")
   pe = PE[int, int, string](2, "fuga")
 
-#[
 let
-  paa = P.PA.new(3)
-  pbb = P.PB.new(2, 3)
-  pcc = P.PC.new
-  pdd = P.PD.new("hoge")
-  pee = P.PE.new(2, "fuga")
-]#
+  ppa = PP_PA[string](3)
+  ppb = PP_PB[string](2, 3)
+  ppc = PP_PC[string]()
+  ppd = PP_PD[string]("hoge")
+  ppe = PP_PE[string](2, "fuga")
+
+let
+  pppa = P_PP_PA(3)
+  pppb = P_PP_PB(2, 3)
+  pppc = P_PP_PC()
+  pppd = P_PP_PD("hoge")
+  pppe = P_PP_PE(2, "fuga")
 
 doAssert testMatch ha
 doAssert testMatch hb
@@ -111,6 +120,18 @@ doAssert testMatch pc
 doAssert testMatch pd
 doAssert testMatch pe
 
+doAssert testMatch ppa
+doAssert testMatch ppb
+doAssert testMatch ppc
+doAssert testMatch ppd
+doAssert testMatch ppe
+
+doAssert testMatch pppa
+doAssert testMatch pppb
+doAssert testMatch pppc
+doAssert testMatch pppd
+doAssert testMatch pppe
+
 doAssert $ha == "HA(3)"
 doAssert $hb == "HB(2, 3)"
 doAssert $hc == "HC"
@@ -128,5 +149,11 @@ doAssert $pb == "PB(2, 3)"
 doAssert $pc == "PC"
 doAssert $pd == "PD(hoge)"
 doAssert $pe == "PE(2, fuga)"
+
+doAssert $pppa == "PA(3)"
+doAssert $pppb == "PB(2, 3)"
+doAssert $pppc == "PC"
+doAssert $pppd == "PD(hoge)"
+doAssert $pppe == "PE(2, fuga)"
 
 echo "Succeed"

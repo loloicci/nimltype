@@ -19,8 +19,15 @@ proc nimlValueToString*(x: tuple): string =
 proc nimlValueToString*[T: not tuple](x: T): string =
   return "(" & $x & ")"
 
-var kindToType {.compiletime.}: TableRef[string, string] =
-  newTable[string, string]()
+var
+  kindToType {.compiletime.}: TableRef[string, string] =
+    newTable[string, string]()
+  constructorToArgs {.compiletime.}: TableRef[string, seq[NimNode]] =
+    newTable[string, seq[NimNode]]()
+  typeToConstructors {.compiletime.}: TableRef[string, seq[NimIdent]] =
+    newTable[string, seq[NimIdent]]()
+  typeToGeneric {.compiletime.}: TableRef[string, NimNode] =
+    newTable[string, NimNode]()
 
 proc kindToValName(kind: string): string =
   return toLower(kind) & "Val"
@@ -52,6 +59,20 @@ proc newDecAccQuotedIdent(name: string, isPublic: bool): NimNode =
     result = nnkAccQuoted.newTree(
       newIdentNode(name)
     )
+
+proc parseBracket(b: NimNode): tuple[name: string, bracket: seq[NimNode]] =
+  if b.kind == nnkIdent:
+    result.name = $b.ident
+    result.bracket = @[]
+  elif b.kind == nnkBracketExpr:
+    result.bracket = @[]
+    for i, n in b:
+      if i == 0:
+        result.name = $n.ident
+      else:
+        result.bracket.add(n)
+  else:
+    error "Bracket is Invalid:\n" & b.treeRepr
 
 proc parseHeaderIdent(hi: NimNode): tuple[name: string, tyGeneric: NimNode] =
   if hi.kind == nnkIdent:
@@ -209,8 +230,8 @@ proc newNimltypeTree(
   )
 
 proc newConstructorProcTree(
-    kind: NimIdent, kindName: string, tyGeneric: NimNode, typeIdsNode: NimNode,
-    public: bool): NimNode =
+    kind: NimIdent, kindName: string, tyGeneric: NimNode,
+    typeIdsNode: NimNode, public: bool): NimNode =
   var
     args: seq[NimNode] = @[]
     argnames: seq[NimNode] = @[]
@@ -244,6 +265,8 @@ proc newConstructorProcTree(
     valNode = nnkPar.newTree(
       argnames
     )
+
+  constructorToArgs[$kind] = args
 
   result = nnkProcDef.newTree(
     kind.newDecIdentNode(public),
@@ -351,6 +374,7 @@ macro nimltype*(head, body: untyped): untyped =
     kindNodes: seq[NimNode] = @[]
     typeIdsNodes: seq[NimNode] = @[]
 
+
   for cloud in body:
     let (kind, kindNode, typeId) = parseBodyCloud(cloud)
     kinds.add(kind)
@@ -359,6 +383,9 @@ macro nimltype*(head, body: untyped): untyped =
 
     # `kindToType` is global var
     kindToType[$kind] = name
+
+  typeToConstructors[name] = kinds
+  typeToGeneric[name] = tyGeneric
 
   # Define [TypeName]Kind
   let kindTree = newPureEnumTree(kindName, kindNodes, public)
@@ -481,3 +508,91 @@ macro new*(kind: untyped, args: varargs[untyped]): untyped =
       )
     )
   )
+
+proc getTyBracket(name: string, tyGeneric: NimNode): NimNode =
+  if tyGeneric.kind == nnkGenericParams:
+    var bracket = @[newIdentNode(name)]
+    for n in tyGeneric:
+      bracket.add(n[0])
+    result = nnkBracketExpr.newTree(bracket)
+  else:
+    result = newIdentNode(name)
+
+macro nimlSpecial*(body: untyped): untyped =
+  var ret: seq[NimNode] = @[]
+  for n in body:
+    n.expectKind(nnkAsgn)
+
+    let
+      (public, name, tyGeneric) = n[0].parseHeader
+      # this is insted for `auto` in follow
+      # tyBracket = getTyBracket(name, tyGeneric)
+      (gName, gBracket) = n[1].parseBracket
+    var
+      constructors: seq[NimIdent] = @[]
+    typeToGeneric[name] = tyGeneric
+
+    # Define Special Type
+    ret.add(
+      nnkTypeSection.newTree(
+        nnkTypeDef.newTree(
+          name.newDecIdentNode(public),
+          tyGeneric,
+          n[1]
+        )
+      )
+    )
+
+    # Define Special Constructors
+    for c in typeToConstructors[gName]:
+      var args = constructorToArgs[$c]
+      let constructor: string = name & "_" & $c
+      constructors.add(!constructor)
+      var gs: seq[NimNode] = @[]
+      var callArgs: seq[NimNode] = @[]
+      for i, a in args:
+        gs.add(a[1])
+        callArgs.add(a[0])
+      for i, g in typeToGeneric[gName]:
+        let j = gs.find(g[0])
+        if j > -1:
+          args[j][1] = gBracket[i]
+
+      # Save Compiletime Information
+      constructorToArgs[constructor] = args
+
+      ret.add(
+        nnkProcDef.newTree(
+          constructor.newDecIdentNode(public),
+          newEmptyNode(),
+          tyGeneric,
+          nnkFormalParams.newTree(
+            concat(
+              @[newIdentNode("auto")],
+              args
+            )
+          ),
+          newEmptyNode(),
+          newEmptyNode(),
+          nnkStmtList.newTree(
+            nnkReturnStmt.newTree(
+              nnkCall.newTree(
+                concat(
+                  @[
+                    nnkBracketExpr.newTree(
+                      concat(
+                        @[newIdentNode(c)],
+                        gBracket
+                      )
+                    )
+                  ],
+                  callArgs
+                )
+              )
+            )
+          )
+        )
+      )
+    typeToConstructors[name] = constructors
+
+  result = nnkStmtList.newTree(ret)
