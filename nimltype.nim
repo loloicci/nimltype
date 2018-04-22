@@ -130,6 +130,18 @@ proc parseBodyCloud(cloud: NimNode): tuple[
   else:
     error "a cloud is Invalid:\n" & cloud.treeRepr
 
+proc newBracketOfRefObjectWithGeneric(
+    nimltypeName: string, tyGeneric: NimNode): NimNode =
+  if tyGeneric.kind == nnkGenericParams:
+    var bracketItems: seq[NimNode] = @[newIdentNode(nimltypeName)]
+    for i, x in tyGeneric:
+      bracketItems.add(x[0])
+    result = nnkBracketExpr.newTree(bracketItems)
+  elif tyGeneric.kind == nnkEmpty:
+    result = newIdentNode(nimltypeName)
+  else:
+    error "tyGeneric is Invalid:\n" & tyGeneric.treeRepr
+
 proc newPureEnumTree(
     name: string, ofClouds: seq[NimNode], public: bool): NimNode =
   result = nnkTypeDef.newTree(
@@ -148,11 +160,12 @@ proc newPureEnumTree(
 proc newRefObjectTree(
     name: string, refTarget: string, tyGeneric: NimNode,
     public: bool): NimNode =
+  let refTyTree = newBracketOfRefObjectWithGeneric(refTarget, tyGeneric)
   result = nnkTypeDef.newTree(
     name.newDecIdentNode(public),
-    newEmptyNode(),
+    tyGeneric,
     nnkRefTy.newTree(
-      newIdentNode(refTarget)
+      refTyTree
     )
   )
 
@@ -183,7 +196,7 @@ proc newNimltypeTree(
 
   result = nnkTypeDef.newTree(
     newIdentNode(name),
-    newEmptyNode(),
+    tyGeneric,
     nnkObjectTy.newTree(
       newEmptyNode(),
       newEmptyNode(),
@@ -235,10 +248,10 @@ proc newConstructorProcTree(
   result = nnkProcDef.newTree(
     kind.newDecIdentNode(public),
     newEmptyNode(),
-    newEmptyNode(),
+    tyGeneric,
     nnkFormalParams.newTree(
       concat(
-        @[newIdentNode(kindToType[$kind])],
+        @[newBracketOfRefObjectWithGeneric(kindToType[$kind], tyGeneric)],
         args
       )
     ),
@@ -247,7 +260,7 @@ proc newConstructorProcTree(
     nnkStmtList.newTree(
       nnkReturnStmt.newTree(
         nnkObjConstr.newTree(
-          newIdentNode(kindToType[$kind]),
+          newBracketOfRefObjectWithGeneric(kindToType[$kind], tyGeneric),
           nnkExprColonExpr.newTree(
             newIdentNode("kind"),
             nnkDotExpr.newTree(
@@ -307,12 +320,12 @@ proc newNimltypeToStringProc(
   result = nnkProcDef.newTree(
     "$".newDecAccQuotedIdent(public),
     newEmptyNode(),
-    newEmptyNode(),
+    tyGeneric,
     nnkFormalParams.newTree(
       newIdentNode("string"),
       nnkIdentDefs.newTree(
         newIdentNode("x"),
-        newIdentNode(nimltypeName),
+        newBracketOfRefObjectWithGeneric(nimltypeName, tyGeneric),
         newEmptyNode()
       )
     ),
