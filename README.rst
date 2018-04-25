@@ -13,7 +13,7 @@ nimltype is a library to use algebraic data type like that of ML in Nim.
 
 Install
 =======
-Under developing.
+Under development.
 
 Example
 =======
