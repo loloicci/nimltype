@@ -300,6 +300,7 @@ proc newConstructorProcTree(
     )
   )
 
+#[
 proc newNimltypeToStringProc(
     nimltypeName: string, kindName: string, tyGeneric: NimNode,
     kinds: seq[NimIdent], public: bool): NimNode =
@@ -360,6 +361,7 @@ proc newNimltypeToStringProc(
       )
     )
   )
+]#
 
 macro nimltype*(head, body: untyped): untyped =
   body.expectKind(nnkStmtList)
@@ -406,8 +408,8 @@ macro nimltype*(head, body: untyped): untyped =
     )
 
   # Define toString proc
-  let toStringProc = newNimltypeToStringProc(
-    name, kindName, tyGeneric, kinds, public)
+  # let toStringProc = newNimltypeToStringProc(
+  #   name, kindName, tyGeneric, kinds, public)
 
   # Make result
   var resultSeq: seq[NimNode] = @[]
@@ -419,7 +421,7 @@ macro nimltype*(head, body: untyped): untyped =
     )
   )
   resultSeq = concat(resultSeq, constructorProcs)
-  resultSeq.add(toStringProc)
+  # resultSeq.add(toStringProc)
   result = nnkStmtList.newTree(
     resultSeq
   )
