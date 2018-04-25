@@ -427,7 +427,6 @@ macro nimltype*(head, body: untyped): untyped =
   )
 
 macro match*(head, body: untyped): untyped =
-  head.expectKind(nnkIdent)
   body.expectKind(nnkStmtList)
 
   var matchClouds: seq[NimNode] = @[
