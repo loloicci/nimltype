@@ -509,6 +509,7 @@ macro new*(kind: untyped, args: varargs[untyped]): untyped =
     )
   )
 
+#[
 proc getTyBracket(name: string, tyGeneric: NimNode): NimNode =
   if tyGeneric.kind == nnkGenericParams:
     var bracket = @[newIdentNode(name)]
@@ -517,6 +518,7 @@ proc getTyBracket(name: string, tyGeneric: NimNode): NimNode =
     result = nnkBracketExpr.newTree(bracket)
   else:
     result = newIdentNode(name)
+]#
 
 macro nimlSpecial*(body: untyped): untyped =
   var ret: seq[NimNode] = @[]
