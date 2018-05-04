@@ -39,6 +39,20 @@ proc testMatch(x: Hoge): bool =
       if b == "fuga":
          result = true
 
+proc testMatch2(x: Hoge): bool =
+  match x:
+    HC:
+      return true
+    else:
+      return true
+
+proc testMatch3(x: Hoge): bool =
+  match x:
+    HA a:
+      return true
+    else:
+      return true
+
 proc testMatch(x: Fuga): bool =
   match x:
     FA a:
@@ -108,6 +122,18 @@ doAssert testMatch hc
 doAssert testMatch hd
 doAssert testMatch he
 
+doAssert testMatch2 ha
+doAssert testMatch2 hb
+doAssert testMatch2 hc
+doAssert testMatch2 hd
+doAssert testMatch2 he
+
+doAssert testMatch3 ha
+doAssert testMatch3 hb
+doAssert testMatch3 hc
+doAssert testMatch3 hd
+doAssert testMatch3 he
+
 doAssert testMatch fa
 doAssert testMatch fb
 doAssert testMatch fc
@@ -132,6 +158,7 @@ doAssert testMatch pppc
 doAssert testMatch pppd
 doAssert testMatch pppe
 
+#[
 doAssert $ha == "HA(3)"
 doAssert $hb == "HB(2, 3)"
 doAssert $hc == "HC"
@@ -155,5 +182,6 @@ doAssert $pppb == "PB(2, 3)"
 doAssert $pppc == "PC"
 doAssert $pppd == "PD(hoge)"
 doAssert $pppe == "PE(2, fuga)"
+]#
 
 echo "Succeed"

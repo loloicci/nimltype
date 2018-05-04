@@ -47,6 +47,7 @@ proc newDecIdentNode(name: NimIdent, isPublic: bool): NimNode =
 proc newDecIdentNode(name: string, isPublic: bool): NimNode =
   return newDecIdentNode(!name, isPublic)
 
+#[
 proc newDecAccQuotedIdent(name: string, isPublic: bool): NimNode =
   if isPublic:
     result = nnkPostfix.newTree(
@@ -59,6 +60,7 @@ proc newDecAccQuotedIdent(name: string, isPublic: bool): NimNode =
     result = nnkAccQuoted.newTree(
       newIdentNode(name)
     )
+]#
 
 proc parseBracket(b: NimNode): tuple[name: string, bracket: seq[NimNode]] =
   if b.kind == nnkIdent:
@@ -435,6 +437,7 @@ macro match*(head, body: untyped): untyped =
         newIdentNode("kind")
       )
     ]
+  var elseCloud: NimNode = newNilLit()
 
   for cloud in body:
     var cloudBody: seq[NimNode] = @[]
@@ -473,8 +476,24 @@ macro match*(head, body: untyped): untyped =
         )
       else:
          error "cloud is Invalid\n" & cloud.treeRepr
-
-    cloudBody.add(cloud[^1])
+      if cloud.len == 4:
+        cloud[3].expectKind(nnkElse)
+        cloudBody.add(cloud[2])
+        elseCloud = cloud[3]
+      elif cloud.len == 3:
+        cloudBody.add(cloud[2])
+      else:
+         error "cloud is Invalid\n" & cloud.treeRepr
+    else:
+      cloud.expectKind(nnkCall)
+      if cloud.len == 3:
+        cloud[2].expectKind(nnkElse)
+        cloudBody.add(cloud[1])
+        elseCloud = cloud[2]
+      elif cloud.len == 2:
+        cloudBody.add(cloud[1])
+      else:
+         error "cloud is Invalid\n" & cloud.treeRepr
     matchClouds.add(
       nnkOfBranch.newTree(
         nnkDotExpr.newTree(
@@ -484,6 +503,8 @@ macro match*(head, body: untyped): untyped =
         nnkStmtList.newTree(cloudBody)
       )
     )
+  if elseCloud.kind == nnkElse:
+    matchClouds.add(elseCloud)
 
   result = nnkStmtList.newTree(
     nnkCaseStmt.newTree(
