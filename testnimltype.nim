@@ -42,14 +42,14 @@ proc testMatch(x: Hoge): bool =
 proc testMatch2(x: Hoge): bool =
   match x:
     HC:
-      return true
+      return false
     else:
       return true
 
 proc testMatch3(x: Hoge): bool =
   match x:
     HA a:
-      return true
+      return false
     else:
       return true
 
@@ -124,11 +124,11 @@ doAssert testMatch he
 
 doAssert testMatch2 ha
 doAssert testMatch2 hb
-doAssert testMatch2 hc
+doAssert (not (testMatch2 hc))
 doAssert testMatch2 hd
 doAssert testMatch2 he
 
-doAssert testMatch3 ha
+doAssert (not (testMatch3 ha))
 doAssert testMatch3 hb
 doAssert testMatch3 hc
 doAssert testMatch3 hd
