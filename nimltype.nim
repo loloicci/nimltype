@@ -30,7 +30,7 @@ var
     newTable[string, NimNode]()
 
 proc kindToValName(kind: string): string =
-  return toLower(kind) & "Val"
+  return strutils.toLowerAscii(kind) & "Val"
 
 proc kindToValName(kind: NimIdent): string {.compiletime.} =
   return ($kind).kindToValName
