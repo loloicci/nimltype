@@ -183,5 +183,3 @@ doAssert $pppc == "PC"
 doAssert $pppd == "PD(hoge)"
 doAssert $pppe == "PE(2, fuga)"
 ]#
-
-echo "Succeed"

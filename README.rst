@@ -17,8 +17,8 @@ Under development.
 
 Example
 =======
-See `testnimltype.nim`_
+See `tests/test.nim`_
 
 
 .. _Nim: https://nim-lang.org
-.. _testnimltype.nim: testnimltype.nim
+.. _tests/test.nim: tests/test.nim
