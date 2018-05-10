@@ -48,7 +48,7 @@ proc testMatch2(x: Hoge): bool =
 
 proc testMatch3(x: Hoge): bool =
   match x:
-    HA a:
+    HA _:
       return false
     else:
       return true
